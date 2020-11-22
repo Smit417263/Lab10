@@ -17,97 +17,159 @@
 #include "keypad.h"
 #include "scheduler.h"
 
-unsigned char tmpB = 0x00;
-
-enum SM1_States{SM1_output};
-
-int SMTick1(int state){
-	unsigned char x;
-	x = GetKeypadKey();
-	switch(state){
-		case SM1_output:
-			switch (x) {
-				case '\0': tmpB = 0x1F; break; // All 5 LEDs on
-				case '1': tmpB = 0x01; break; // hex equivalent
-				case '2': tmpB = 0x02; break;
-				case '3': tmpB = 0x03; break;
-				case '4': tmpB = 0x04; break;
-				case '5': tmpB = 0x05; break;
-				case '6': tmpB = 0x06; break;
-				case '7': tmpB = 0x07; break;
-				case '8': tmpB = 0x08; break;
-				case '9': tmpB = 0x09; break;
-				case 'A': tmpB = 0x0A; break;
-				case 'B': tmpB = 0x0B; break;
-				case 'C': tmpB = 0x0C; break;
-				case 'D': tmpB = 0x0D; break;
-				case '*': tmpB = 0x0E; break;
-				case '0': tmpB = 0x00; break;
-				case '#': tmpB = 0x0F; break;
-				default: tmpB = 0x1B; break; // Should never occur. Middle LED off.
-			}
-			state = SM1_output;
-			PORTB=tmpB;
-			break;
-		}
-		return state;
-}
 
 
-int main()
-{
-	// Set Data Direction Registers
-	// Buttons PORTA[0-7], set AVR PORTA to pull down logic
-	DDRA = 0xFF; PORTA = 0x00;
-	DDRB = 0xFF; PORTB = 0x00;
-	DDRC = 0xF0; PORTC = 0x0F; // PC7..4 outputs init 0s, PC3..0 inputs init 1s
-	DDRD = 0xFF; PORTD = 0x00;
-	// Period for the tasks
-	unsigned long int SMTick1_calc = 20;
+unsigned char led0_output = 0x00;
+unsigned char led1_output = 0x00;
+unsigned char pause = 0;
 
 
-	//Calculating GCD
-	unsigned long int tmpGCD = 10;
 
-	//Greatest common divisor for all tasks or smallest time unit for tasks.
-	unsigned long int GCD = tmpGCD;
+enum pauseButtonSM_States { pauseButton_wait, pauseButton_press, pauseButton_release };
 
-	//Recalculate GCD periods for scheduler
-	unsigned long int SMTick1_period = SMTick1_calc/GCD;
+// Monitors button connected to PA0.
+// When button is pressed, shared variable "pause" is toggled.
+int pauseButtonSMTick(int state) {
+	// Local Variables
+	unsigned char press = ~PINA & 0x01;
 
-	//Declare an array of tasks
-	static task task1;
-	task *tasks[] = { &task1};
-	const unsigned short numTasks = sizeof(tasks)/sizeof(task*);
-
-	// Task 1
-	task1.state = 0;//Task initial state.
-	task1.period = SMTick1_period;//Task Period.
-	task1.elapsedTime = SMTick1_period;//Task current elapsed time.
-	task1.TickFct = &SMTick1;//Function pointer for the tick.
-
-
-	// Set the timer and turn it on
-	TimerSet(GCD);
-	TimerOn();
-
-	unsigned short i; // Scheduler for-loop iterator
-	while(1) {
-		// Scheduler code
-		for ( i = 0; i < numTasks; i++ ) {
-			// Task is ready to tick
-			if ( tasks[i]->elapsedTime == tasks[i]->period ) {
-				// Setting next state for task
-				tasks[i]->state = tasks[i]->TickFct(tasks[i]->state);
-				// Reset the elapsed time for next tick.
-				tasks[i]->elapsedTime = 0;
-			}
-			tasks[i]->elapsedTime += 1;
-		}
-		while(!TimerFlag);
-		TimerFlag = 0;
+	switch (state) { //State machine transitions
+		case pauseButton_wait:
+state = press == 0x01? pauseButton_press: pauseButton_wait; break;
+		case pauseButton_press:
+state = pauseButton_release; break;
+		case pauseButton_release:
+state = press == 0x00? pauseButton_wait: pauseButton_press; break;
+		default: state = pauseButton_wait; break;
 	}
-
-	// Error: Program should not exit!
-	return 0;
+	switch(state) { //State machine actions
+		case pauseButton_wait:	break;
+	case pauseButton_press:
+pause = (pause == 0) ? 1 : 0; // toggle pause
+break;
+		case pauseButton_release: break;
+	}
+	return state;
 }
+
+
+enum toggleLED0_States { toggleLED0_wait, toggleLED0_blink };
+
+// If paused: Do NOT toggle LED connected to PB0
+// If unpaused: toggle LED connected to PB0
+int toggleLED0SMTick(int state) {
+	switch (state) { //State machine transitions
+		case toggleLED0_wait: state = !pause? toggleLED0_blink: toggleLED0_wait; break;
+		case toggleLED0_blink: state = pause? toggleLED0_wait: toggleLED0_blink; break;
+	default: state = toggleLED0_wait; break;
+	}
+	switch(state) { //State machine actions
+		case toggleLED0_wait: break;
+		case toggleLED0_blink:
+led0_output = (led0_output == 0x00) ? 0x01 : 0x00; //toggle LED
+break;
+	}
+	return state;
+}
+
+
+enum toggleLED1_States { toggleLED1_wait, toggleLED1_blink };
+
+// If paused: Do NOT toggle LED connected to PB1
+// If unpaused: toggle LED connected to PB1
+int toggleLED1SMTick(int state) {
+	switch (state) { //State machine transitions
+		case toggleLED1_wait: state = !pause? toggleLED1_blink: toggleLED1_wait; break;
+		case toggleLED1_blink: state = pause? toggleLED1_wait: toggleLED1_blink; break;
+	default: state = toggleLED1_wait; break;
+	}
+	switch(state) { //State machine actions
+		case toggleLED1_wait: break;
+		case toggleLED1_blink:
+led1_output = (led1_output == 0x00) ? 0x01 : 0x00; //toggle LED
+break;
+	}
+	return state;
+}
+
+
+enum display_States { display_display };
+
+// Combine blinking LED outputs from toggleLED0 SM and toggleLED1 SM, and output on PORTB
+int displaySMTick(int state) {
+	// Local Variables
+	unsigned char output;
+
+	switch (state) { //State machine transitions
+		case display_display: state = display_display; break;
+		default: state = display_display; break;
+	}
+	switch(state) { //State machine actions
+		case display_display:
+output = led0_output | led1_output << 1; // write shared outputs
+									// to local variables
+break;
+	}
+	PORTB = output;	// Write combined, shared output variables to PORTB
+	return state;
+}
+
+
+
+int main() {
+DDRA = 0x00; PORTA = 0xFF;
+DDRB = 0xFF; PORTB = 0x00;
+
+//Declare an array of tasks
+static task task1, task2, task3, task4;
+task *tasks[] = { &task1, &task2, &task3, &task4 };
+const unsigned short numTasks = sizeof(tasks)/sizeof(task*);
+
+const char start = -1;
+// Task 1 (pauseButtonToggleSM)
+task1.state = start;//Task initial state.
+task1.period = 50;//Task Period.
+task1.elapsedTime = task1.period;//Task current elapsed time.
+task1.TickFct = &pauseButtonSMTick;//Function pointer for the tick.
+// Task 2 (toggleLED0SM)
+task2.state = start;//Task initial state.
+task2.period = 500;//Task Period.
+task2.elapsedTime = task2.period;//Task current elapsed time.
+task2.TickFct = &toggleLED0SMTick;//Function pointer for the tick.
+// Task 3 (toggleLED1SM)
+task3.state = start;//Task initial state.
+task3.period = 1000;//Task Period.
+task3.elapsedTime = task3.period; // Task current elasped time.
+task3.TickFct = &toggleLED1SMTick; // Function pointer for the tick.
+// Task 4 (displaySM)
+task4.state = start;//Task initial state.
+task4.period = 10;//Task Period.
+task4.elapsedTime = task4.period; // Task current elasped time.
+task4.TickFct = &displaySMTick; // Function pointer for the tick.
+
+
+unsigned long GCD = tasks[0]->period;
+for ( int i = 1; i < numTasks; i++ ) { 
+	GCD = findGCD(GCD,tasks[i]->period);
+}
+
+
+// Set the timer and turn it on
+TimerSet(GCD);
+TimerOn();
+
+unsigned short i; // Scheduler for-loop iterator
+while(1) {
+	for ( i = 0; i < numTasks; i++ ) { // Scheduler code
+		if ( tasks[i]->elapsedTime == tasks[i]->period ) { // Task is ready to tick
+			tasks[i]->state = tasks[i]->TickFct(tasks[i]->state); // Set next state
+			tasks[i]->elapsedTime = 0; // Reset the elapsed time for next tick.
+		}
+		tasks[i]->elapsedTime += GCD;
+	}
+	while(!TimerFlag);
+		TimerFlag = 0;
+}
+return 0; // Error: Program should not exit!
+}
+

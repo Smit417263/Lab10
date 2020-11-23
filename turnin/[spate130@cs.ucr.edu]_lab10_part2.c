@@ -27,7 +27,7 @@ task tasks[3];
 
 unsigned char tempB = 1;
 
-const unsigned short =3;
+const unsigned short num = 3;
 const unsigned long t_period=100;
 
 enum Key{start,wait,on,checker,done};

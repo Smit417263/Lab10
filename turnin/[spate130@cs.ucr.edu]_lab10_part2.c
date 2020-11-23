@@ -6,6 +6,8 @@
  *
  *	I acknowledge all content contained herein, excluding template or example
  *	code, is my own original work.
+ *
+ *	Demo Link: https://youtu.be/BNM73diQr7o
  */
 
 #include <avr/io.h>
@@ -22,10 +24,11 @@
 
 
 task tasks[3];
-const unsigned short tasksNum=3;
-const unsigned long tasksPeriod=100;
 
 unsigned char tempB = 1;
+
+const unsigned short =3;
+const unsigned long t_period=100;
 
 enum Key{start,wait,on,checker,done};
 
